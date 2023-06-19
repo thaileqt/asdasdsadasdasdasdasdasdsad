@@ -9,6 +9,8 @@ def load_data(folder_path):
 
     combined_df = pd.concat(dfs, ignore_index=True)
     combined_df.drop_duplicates(subset="id", keep="first", inplace=True)
+    combined_df = combined_df.reset_index()
+    combined_df.drop('index', axis=1, inplace=True)
     return combined_df
 
 
