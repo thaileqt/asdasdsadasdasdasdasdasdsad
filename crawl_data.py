@@ -3,16 +3,33 @@ import glob
 import requests
 import json
 import csv
+from tqdm import tqdm
+import pandas as pd
 
-def get_current_cat_id(save_folder, min=1):
-    csv_files = glob.glob(save_folder + "/" + "*.csv")
-    if len(csv_files) != 0:
-        return max(map(lambda x: int(x.split('/')[1].split('.')[0]), csv_files))
-    else:
-        return min
+
+
+def create_filename(folder_name):
+    if len(os.listdir(folder_name)) == 0:
+        return f'{folder_name}/1.csv'
+    csv_fn = glob.glob(f'{folder_name}/' + '*.csv')
+    filename = list(map(lambda x: int(x.split('/')[-1].split('.')[0]), csv_fn))
+    return f'{folder_name}/{max(filename)+1}.csv'
+
+def last_crawl_at(folder_name, ids):
+    if len(os.listdir(folder_name)) == 0:
+        return 0 
+    csv_fn = glob.glob(f'{folder_name}/' + '*.csv')
+    file_path = list(map(lambda x: int(x.split('/')[-1].split('.')[0]), csv_fn))
+    file_path = f'{folder_name}/{max(file_path)}.csv'
+    return ids.index(str(pd.read_csv(file_path).tail(1)['id'].values[0]))
+
+
+def get_id_list_from_file(file_path):
+    with open(file_path, "r") as f:
+        id_list = f.read().splitlines()
+    return id_list
 
 def save_data(products, filename):
-
     fieldnames = set().union(*(d.keys() for d in products))
     with open(filename, mode="w", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=fieldnames)
@@ -56,14 +73,46 @@ def crawl(cat_id_list, save_folder='data', logs=True):
         crawl(failed_request_at, save_folder, logs)
 
 
+def crawl_product_by_id(id_list, save_path, checking_fail=False):
+    headers = {"user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 11_1_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.96 Safari/537.36"}
+    product_url = "https://tiki.vn/api/v2/products/{}"
+
+    
+    products = []
+    failed = []
+    desc = 'Crawling products' if not checking_fail else 'Crawling failed products'
+    for i in tqdm(id_list, desc=desc):
+        try:
+            response = requests.get(product_url.format(i), headers=headers)
+            info = json.loads(response.text)
+        except:
+            failed.append(i)
+            continue
+        cols = ['images', 'url_key', 'url_path', 'short_url', 'thumbnail_url']
+        for c in cols:
+            info.pop(c)
+        products.append(info)
+
+    if len(failed) > 0:
+        products.extend(crawl_product_by_id(failed, save_path, True))
+    if not checking_fail:
+        save_data(products, save_path)
+    else:
+        return products
+
 if __name__ == '__main__':
-    save_folder = 'data4'
-    if not os.path.exists(save_folder):
-        os.makedirs(save_folder)
-    # Check for failed_cat_id every n steps
-    step = 500
-    for i in range(4):
-        # Get current cat_id in save_folder
-        # current = get_current_cat_id(save_folder, min=22000)
-        current = 30000
-        crawl(range(current+i*step, current+step+i*step), save_folder, logs=True)
+      
+    product_id_file = 'id_list2.txt'
+    folder_name = 'newdata2'
+
+    step = 2000
+    if not os.path.isdir(folder_name):
+        os.mkdir(folder_name)
+
+    ids = get_id_list_from_file(product_id_file) # 31k
+    n_file = len(ids) // step
+    for _ in range(n_file):
+        idx = last_crawl_at(folder_name, ids)
+        crawl_product_by_id(ids[idx+1:idx+1+step], create_filename(folder_name))
+
+
